@@ -35,7 +35,8 @@ make format    # Auto-fix lint issues if lint fails
 make test       # Run full test suite with coverage
 make tach       # Check module boundary rules (tach.toml)
 make docstrings # Check docstring coverage (minimum 95%)
-make check      # Run lint + test + tach + docstrings (equivalent to CI)
+make reuse      # Check REUSE (SPDX license/copyright) compliance
+make check      # Run lint + test + tach + docstrings + deadcode + reuse (equivalent to CI)
 ```
 
 **When `pyproject.toml` changes** (added/removed/changed dependencies):
@@ -77,6 +78,7 @@ make clean        # Remove build artifacts
 
 - **Container Readiness**: When modifying init scripts or server startup, preserve readiness markers (see `docs/DEVELOPER.md`)
 - **Security Modes**: Understand online vs gatekeeping modes when working with git operations
+- **Agent Instructions**: When modifying container setup (Dockerfile templates, init scripts, installed tools), check if `src/luskctl/resources/instructions/default.md` needs updating
 - **Minimal Changes**: Make surgical, focused changes
 - **Existing Tests**: Never remove or modify unrelated tests
 - **Dependencies**: Use Poetry for dependency management; avoid adding unnecessary dependencies

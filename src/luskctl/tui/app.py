@@ -81,6 +81,9 @@ if _HAS_TEXTUAL:
         "build_full": "_action_build_full",
         "init_ssh": "action_init_ssh",
         "sync_gate": "_action_sync_gate",
+        "edit_instructions": "_action_edit_instructions",
+        "toggle_inherit": "_action_toggle_instructions_inherit",
+        "show_resolved": "_action_show_resolved_instructions",
     }
 
     TASK_ACTION_HANDLERS: dict[str, str] = {
@@ -687,6 +690,14 @@ if _HAS_TEXTUAL:
                 return
 
         # ---------- Actions (keys + called from buttons) ----------
+
+        async def action_edit_global_instructions(self) -> None:
+            """Edit Global Instructions."""
+            await self._action_edit_global_instructions()
+
+        async def action_show_default_instructions(self) -> None:
+            """Show Default Instructions."""
+            await self._action_show_default_instructions()
 
         async def action_quit(self) -> None:
             """Exit the TUI cleanly."""

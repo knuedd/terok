@@ -94,6 +94,31 @@ def render_project_details(
     upstream = project.upstream_url or "-"
     security_emoji = draw_emoji("🚪" if project.security_class == "gatekeeping" else "🌐")
 
+    dim_style = Style(dim=True)
+    # Three-state badge based on YAML config + file existence
+    yaml_instructions = project.agent_config.get("instructions")
+    try:
+        has_file = (project.root / "instructions.md").is_file()
+    except (TypeError, AttributeError):
+        has_file = False
+    has_yaml = yaml_instructions is not None
+
+    if has_yaml or has_file:
+        # Check if _inherit is present (or YAML is absent = implicit inherit)
+        inherits = not has_yaml
+        if isinstance(yaml_instructions, list):
+            inherits = "_inherit" in yaml_instructions
+        elif isinstance(yaml_instructions, dict):
+            inherits = any(
+                isinstance(v, list) and "_inherit" in v for v in yaml_instructions.values()
+            )
+        if inherits:
+            instr_s = Text("custom + inherited", style=Style(color=success_color))
+        else:
+            instr_s = Text("custom only", style=Style(color="cyan"))
+    else:
+        instr_s = Text("default", style=dim_style)
+
     lines = [
         Text(f"Project:   {project.id} {security_emoji}"),
         Text(upstream),
@@ -102,6 +127,7 @@ def render_project_details(
         Text.assemble("Images:      ", images_s),
         Text.assemble("SSH dir:     ", ssh_s),
         Text.assemble("Git gate:    ", gate_s),
+        Text.assemble("Instruct:    ", instr_s),
         tasks_line,
     ]
 
