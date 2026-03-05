@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 import yaml
 
@@ -73,13 +74,29 @@ def task_logs(
             f"Start it first via 'terokctl task run-cli {project_id} {task_id}'."
         )
 
+    # Validate --tail early so both live and persisted paths behave consistently
+    if options.tail is not None and options.tail < 0:
+        raise SystemExit("--tail must be >= 0")
+
     cname = container_name(project.id, mode, task_id)
 
     # Verify container exists (running or exited)
     state = get_container_state(cname)
     if state is None:
+        # Fall back to persisted log files on the host
+        task_dir = project.tasks_root / str(task_id)
+        log_file = task_dir / "logs" / "container.log"
+        if log_file.is_file():
+            _show_persisted_logs(
+                log_file,
+                tail=options.tail,
+                streaming=options.streaming,
+                mode=mode,
+                provider=meta.get("provider"),
+            )
+            return
         raise SystemExit(
-            f"Container {cname} does not exist. "
+            f"Container {cname} does not exist and no persisted logs found. "
             f"Run 'terokctl task restart {project_id} {task_id}' first."
         )
 
@@ -88,8 +105,6 @@ def task_logs(
     if options.follow:
         cmd.append("-f")
     if options.tail is not None:
-        if options.tail < 0:
-            raise SystemExit("--tail must be >= 0")
         cmd.extend(["--tail", str(options.tail)])
     cmd.append(cname)
 
@@ -180,3 +195,33 @@ def task_logs(
 
     if interrupted:
         print()
+
+
+def _show_persisted_logs(
+    log_file: Path,
+    *,
+    tail: int | None = None,
+    streaming: bool = True,
+    mode: str | None = None,
+    provider: str | None = None,
+) -> None:
+    """Display logs from a persisted log file on disk.
+
+    Applies the same formatter pipeline as live container logs so output
+    is consistent whether reading from podman or from the host filesystem.
+    Streams the file line-by-line to avoid loading the entire log into memory.
+    """
+    from collections import deque
+
+    formatter = auto_detect_formatter(mode, streaming=streaming, provider=provider)
+
+    with log_file.open("r", encoding="utf-8", errors="replace") as f:
+        if tail is not None and tail > 0:
+            for line in deque((ln.rstrip("\n") for ln in f), maxlen=tail):
+                formatter.feed_line(line)
+        elif tail == 0:
+            pass  # tail=0 means show nothing
+        else:
+            for line in f:
+                formatter.feed_line(line.rstrip("\n"))
+    formatter.finish()
