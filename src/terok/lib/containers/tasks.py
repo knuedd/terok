@@ -15,7 +15,6 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml  # pip install pyyaml
@@ -29,7 +28,7 @@ from ..util.ansi import (
     yellow as _yellow,
 )
 from ..util.emoji import render_emoji
-from ..util.fs import ensure_dir
+from ..util.fs import archive_timestamp, create_archive_dir, ensure_dir
 from ..util.logging_utils import _log_debug
 from .runtime import (
     container_name,
@@ -548,25 +547,14 @@ def _archive_task(project: Project, task_id: str, meta: dict) -> Path | None:
     """
     try:
         task_name = meta.get("name", "")
-        ts = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        ts = archive_timestamp()
         # Build archive dir name: timestamp_taskid_name (name may be empty)
         dir_name = f"{ts}_{task_id}"
         if task_name:
             dir_name = f"{dir_name}_{task_name}"
 
         archive_root = tasks_archive_dir(project.id)
-        ensure_dir(archive_root)
-        archive_dir = archive_root / dir_name
-        # Use a suffix loop to handle the unlikely case of a collision
-        suffix = 0
-        while True:
-            candidate = archive_dir if suffix == 0 else archive_root / f"{dir_name}_{suffix}"
-            try:
-                candidate.mkdir(parents=True, exist_ok=False)
-                archive_dir = candidate
-                break
-            except FileExistsError:
-                suffix += 1
+        archive_dir = create_archive_dir(archive_root, dir_name)
 
         # Save metadata snapshot
         (archive_dir / "task.yml").write_text(yaml.safe_dump(meta))
