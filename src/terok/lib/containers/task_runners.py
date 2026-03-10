@@ -28,7 +28,7 @@ from ..util.ansi import (
     yellow as _yellow,
 )
 from ..util.podman import _podman_userns_args
-from .agent_config import resolve_agent_config
+from .agent_config import resolve_agent_config, resolve_provider_value
 from .agents import AgentConfigSpec, prepare_agent_config_dir
 from .environment import (
     apply_web_env_overrides,
@@ -70,6 +70,7 @@ class HeadlessRunRequest:
     name: str | None = None
     provider: str | None = None
     instructions: str | None = None
+    unrestricted: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -265,6 +266,14 @@ def task_run_cli(
     agent_config_dir = _prepare_agent_config(project, project_id, task_id, agents, preset)
     volumes.append(f"{agent_config_dir}:/home/dev/.terok:Z")
 
+    # Resolve unrestricted mode from config (CLI/web tasks default to True)
+    _effective = resolve_agent_config(project_id, preset=preset)
+    _unrestricted = resolve_provider_value(
+        "unrestricted", _effective, project.default_agent or "claude"
+    )
+    if _unrestricted is None or _unrestricted:
+        env["TEROK_UNRESTRICTED"] = "1"
+
     # Run detached and keep the container alive so users can exec into it later
     # Note: We intentionally do NOT use --rm so containers persist after stopping.
     # This allows `task restart` to quickly resume stopped containers.
@@ -290,6 +299,7 @@ def task_run_cli(
     _assert_running(cname)
 
     meta["mode"] = "cli"
+    meta["unrestricted"] = _unrestricted is None or bool(_unrestricted)
     if preset:
         meta["preset"] = preset
     meta_path.write_text(yaml.safe_dump(meta))
@@ -322,17 +332,13 @@ def task_run_web(
     if mode_updated:
         meta["mode"] = "web"
 
-    preset_updated = False
     if preset and meta.get("preset") != preset:
         meta["preset"] = preset
-        preset_updated = True
 
     port = meta.get("web_port")
-    port_updated = False
     if not isinstance(port, int):
         port = assign_web_port()
         meta["web_port"] = port
-        port_updated = True
 
     env, volumes = build_task_env_and_volumes(project, task_id)
 
@@ -349,14 +355,19 @@ def task_run_web(
     if backend_updated:
         meta["backend"] = effective_backend
 
-    # Write metadata once if anything was updated
-    if port_updated or backend_updated or mode_updated or preset_updated:
-        meta_path.write_text(yaml.safe_dump(meta))
+    # Resolve unrestricted mode from config using the effective backend
+    _effective = resolve_agent_config(project_id, preset=preset)
+    _unrestricted = resolve_provider_value("unrestricted", _effective, effective_backend)
+    resolved_unrestricted = _unrestricted is None or bool(_unrestricted)
+    if resolved_unrestricted:
+        env["TEROK_UNRESTRICTED"] = "1"
 
     cname = container_name(project.id, "web", task_id)
     container_state = get_container_state(cname)
 
-    # If container already exists, handle it
+    # If container already exists, handle it — don't overwrite metadata with
+    # a potentially different unrestricted value while the container keeps its
+    # original environment.
     if container_state is not None:
         color_enabled = _supports_color()
         url = f"http://127.0.0.1:{port}/"
@@ -371,6 +382,10 @@ def task_run_web(
         print("Container started.")
         print(f"Web UI: {_blue(url, color_enabled)}")
         return
+
+    # Persist metadata only when a new container is actually being created
+    meta["unrestricted"] = resolved_unrestricted
+    meta_path.write_text(yaml.safe_dump(meta))
 
     # Start UI in background and return terminal when it's reachable
     # Note: We intentionally do NOT use --rm so containers persist after stopping.
@@ -555,8 +570,18 @@ def task_run_headless(request: HeadlessRunRequest) -> str:
         )
     )
 
+    # Resolve unrestricted mode: CLI flag → config → default (True)
+    unrestricted = request.unrestricted
+    if unrestricted is None:
+        cfg_val = resolve_provider_value("unrestricted", effective, resolved.name)
+        unrestricted = cfg_val if cfg_val is not None else True
+
     # Build env and volumes
     env, volumes = build_task_env_and_volumes(project, task_id)
+
+    # Set TEROK_UNRESTRICTED for the wrapper functions inside the container
+    if unrestricted:
+        env["TEROK_UNRESTRICTED"] = "1"
 
     # Mount agent-config dir to /home/dev/.terok
     volumes.append(f"{agent_config_dir}:/home/dev/.terok:Z")
@@ -585,6 +610,7 @@ def task_run_headless(request: HeadlessRunRequest) -> str:
     meta, meta_path = load_task_meta(project.id, task_id)
     meta["mode"] = "run"
     meta["provider"] = resolved.name
+    meta["unrestricted"] = unrestricted
     if request.preset:
         meta["preset"] = request.preset
     meta_path.write_text(yaml.safe_dump(meta))

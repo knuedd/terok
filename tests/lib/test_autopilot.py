@@ -277,14 +277,14 @@ class GenerateClaudeWrapperTests(unittest.TestCase):
         wrapper = _generate_claude_wrapper(WrapperConfig(has_agents=True, project=project))
         self.assertIn("agents.json", wrapper)
 
-    def test_wrapper_skip_perms_false(self) -> None:
-        """Wrapper omits --dangerously-skip-permissions when skip_permissions=False."""
+    def test_wrapper_uses_terok_unrestricted_env(self) -> None:
+        """Wrapper conditionally injects --dangerously-skip-permissions via TEROK_UNRESTRICTED."""
         project = self._make_project()
-        wrapper = _generate_claude_wrapper(
-            WrapperConfig(has_agents=False, project=project, skip_permissions=False)
-        )
-        self.assertNotIn("--dangerously-skip-permissions", wrapper)
-        # --add-dir / is always present regardless of skip_permissions
+        wrapper = _generate_claude_wrapper(WrapperConfig(has_agents=False, project=project))
+        # The flag is gated by the env var check, not unconditionally injected
+        self.assertIn('if [ "${TEROK_UNRESTRICTED:-}" = "1" ]; then', wrapper)
+        self.assertIn("_args+=(--dangerously-skip-permissions)", wrapper)
+        # --add-dir / is always present regardless of permission mode
         self.assertIn('--add-dir "/"', wrapper)
 
     def test_wrapper_no_model_or_mcp(self) -> None:
