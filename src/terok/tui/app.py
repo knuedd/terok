@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 # SPDX-FileCopyrightText: 2025 Jiri Vyskocil
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
 """Terok TUI application built on Textual."""
 
+import inspect
 import os
 import sys
 
@@ -60,6 +62,7 @@ if _HAS_TEXTUAL:
         get_project_state,
         get_server_status,
         is_task_image_old,
+        shield_state as _shield_state,
     )
 
     @dataclass(frozen=True)
@@ -129,6 +132,8 @@ if _HAS_TEXTUAL:
         "login": "_action_login",
         "follow_logs": "_action_follow_logs",
         "rename": "_action_rename_task",
+        "shield_down": "_action_shield_down",
+        "shield_up": "_action_shield_up",
     }
 
     class TerokTUI(PollingMixin, ProjectActionsMixin, TaskActionsMixin, App):
@@ -580,6 +585,35 @@ if _HAS_TEXTUAL:
             image_old = is_task_image_old(project_id, task)
             return project_id, task.task_id, image_old
 
+        def _query_shield_state(self, project_id: str, task: TaskMeta) -> None:
+            """Schedule a background worker to query shield state for a task."""
+            if not task.mode:
+                return
+            tid = task.task_id
+            self.run_worker(
+                lambda: self._load_shield_state(project_id, task),
+                name=f"shield-state:{project_id}:{tid}",
+                group="shield-state",
+                exclusive=True,
+                thread=True,
+                exit_on_error=False,
+            )
+
+        @staticmethod
+        def _load_shield_state(project_id: str, task: TaskMeta) -> tuple[str, str, str | None]:
+            """Query shield state for a task (runs in thread)."""
+            try:
+                project = load_project(project_id)
+                mode = task.mode or "cli"
+                from ..lib.containers.runtime import container_name
+
+                cname = container_name(project_id, mode, task.task_id)
+                task_dir = project.tasks_root / str(task.task_id)
+                st = _shield_state(cname, task_dir)
+                return project_id, task.task_id, st.name
+            except Exception:
+                return project_id, task.task_id, None
+
         # ---------- Selection handlers (from widgets) ----------
 
         @on(ProjectList.ProjectSelected)
@@ -613,6 +647,7 @@ if _HAS_TEXTUAL:
             # Immediately check container state when task is selected
             if self.current_task and self.current_task.mode:
                 self._queue_container_state_check(message.project_id)
+                self._query_shield_state(message.project_id, self.current_task)
 
         @on(Worker.StateChanged)
         async def handle_worker_state_changed(self, event: Worker.StateChanged) -> None:
@@ -779,6 +814,38 @@ if _HAS_TEXTUAL:
                 self._refresh_project_state()
                 return
 
+            if worker.group == "shield-action":
+                result = worker.result
+                if not result:
+                    return
+                project_id, task_id, error = result
+                if error:
+                    self.notify(f"Shield action failed: {error}")
+                else:
+                    self.notify(f"Shield updated for task {task_id}")
+                # Refresh shield state after action
+                if (
+                    self.current_task
+                    and self.current_task.task_id == task_id
+                    and project_id == self.current_project_id
+                ):
+                    self._query_shield_state(project_id, self.current_task)
+                return
+
+            if worker.group == "shield-state":
+                result = worker.result
+                if not result:
+                    return
+                project_id, task_id, shield_st = result
+                if project_id != self.current_project_id:
+                    return
+                if not self.current_task or self.current_task.task_id != task_id:
+                    return
+                self.current_task.shield_state = shield_st
+                details = self.query_one("#task-details", TaskDetails)
+                details.set_task(self.current_task, image_old=self._last_image_old)
+                return
+
         # ---------- Actions (keys + called from buttons) ----------
 
         async def action_edit_global_instructions(self) -> None:
@@ -852,13 +919,17 @@ if _HAS_TEXTUAL:
                 return
             handler = PROJECT_ACTION_HANDLERS.get(action)
             if handler:
-                await getattr(self, handler)()
+                result = getattr(self, handler)()
+                if inspect.isawaitable(result):
+                    await result
 
         async def _handle_task_action(self, action: str) -> None:
             """Handle task actions."""
             handler = TASK_ACTION_HANDLERS.get(action)
             if handler:
-                await getattr(self, handler)()
+                result = getattr(self, handler)()
+                if inspect.isawaitable(result):
+                    await result
 
         # ---------- Command palette ----------
 

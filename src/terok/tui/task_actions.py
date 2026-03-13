@@ -7,6 +7,9 @@ Handles task creation, deletion, renaming, running (CLI/web/autopilot),
 login, restart, follow-up, log viewing, and diff copying.
 """
 
+from collections.abc import Callable
+from pathlib import Path
+
 from ..lib.containers.agents import parse_md_agent
 from ..lib.containers.autopilot import wait_for_container_exit
 from ..lib.containers.runtime import container_name, get_container_state
@@ -21,6 +24,8 @@ from ..lib.core.config import is_experimental
 from ..lib.core.projects import load_project
 from ..lib.facade import (
     HeadlessRunRequest,
+    shield_down,
+    shield_up,
     task_delete,
     task_followup_headless,
     task_new,
@@ -563,7 +568,50 @@ class TaskActionsMixin:
         """Copy git diff vs previous commit to clipboard."""
         await self._copy_diff_to_clipboard("PREV", "PREV")
 
-    # --- Main-screen task pane shortcuts (c/w/d) ---
+    # --- Shield actions ---
+
+    def _action_shield_toggle(
+        self,
+        action: str,
+        shield_fn: Callable[[str, Path], None],
+    ) -> None:
+        """Run a shield action (down/up) for the current task in a background worker."""
+        if not self.current_project_id or not self.current_task:
+            self.notify("No task selected.")
+            return
+        pid = self.current_project_id
+        task = self.current_task
+        tid = task.task_id
+        cname = container_name(pid, task.mode or "cli", tid)
+
+        def work() -> tuple[str, str, str | None]:
+            """Execute shield action in background thread."""
+            try:
+                task_dir = load_project(pid).tasks_root / str(tid)
+                shield_fn(cname, task_dir)
+                return pid, tid, None
+            except SystemExit as e:
+                return pid, tid, str(e)
+            except Exception as e:
+                return pid, tid, str(e)
+
+        self.run_worker(
+            work,
+            name=f"shield-action:{action}:{pid}:{tid}",
+            group="shield-action",
+            thread=True,
+            exit_on_error=False,
+        )
+
+    def _action_shield_down(self) -> None:
+        """Drop the shield (bypass mode) for the current task."""
+        self._action_shield_toggle("down", shield_down)
+
+    def _action_shield_up(self) -> None:
+        """Raise the shield (deny-all) for the current task."""
+        self._action_shield_toggle("up", shield_up)
+
+    # --- Main-screen task pane shortcuts (c/w/X/D/s) ---
 
     async def action_run_cli_from_main(self) -> None:
         """Start a new CLI task from the main screen."""
@@ -572,6 +620,14 @@ class TaskActionsMixin:
     async def action_delete_task_from_main(self) -> None:
         """Delete the selected task from the main screen."""
         await self.action_delete_task()
+
+    def action_shield_down_from_main(self) -> None:
+        """Drop the shield from the main screen."""
+        self._action_shield_toggle("down", shield_down)
+
+    def action_shield_up_from_main(self) -> None:
+        """Raise the shield from the main screen."""
+        self._action_shield_toggle("up", shield_up)
 
     async def action_login_from_main(self) -> None:
         """Login to the selected task from the main screen."""
