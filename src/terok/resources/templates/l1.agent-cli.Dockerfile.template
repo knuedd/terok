@@ -80,7 +80,7 @@ COPY scripts/blablador /usr/local/bin/blablador
 COPY scripts/kisski /usr/local/bin/kisski
 COPY scripts/vibe-model-sync.sh /usr/local/bin/vibe-model-sync
 COPY scripts/mistral-model-sync.py /usr/local/bin/mistral-model-sync.py
-RUN chmod +x /usr/local/bin/blablador /usr/local/bin/vibe-model-sync /usr/local/bin/mistral-model-sync.py
+RUN chmod +x /usr/local/bin/blablador /usr/local/bin/kisski /usr/local/bin/vibe-model-sync /usr/local/bin/mistral-model-sync.py
 
 # update-all-the-things: refresh all packages without full image rebuild
 COPY scripts/allthethings.sh /usr/local/bin/allthethings.sh
@@ -119,6 +119,7 @@ RUN set -eux; \
       '  printf "  \\033[36mcopilot\\033[0m   - GitHub Copilot CLI\\n"' \
       '  printf "  \\033[36mvibe\\033[0m      - Mistral Vibe CLI (auto-approve enabled)\\n"' \
       '  printf "  \\033[36mblablador\\033[0m - OpenCode with Helmholtz Blablador (full permissions)\\n"' \
+      '  printf "  \\033[36mkisski\\033[0m    - OpenCode with GWDG KISSKI (full permissions)\\n"' \
       '  printf "  \\033[36mopencode\\033[0m  - OpenCode CLI (use terokctl config import-opencode to set up)\\n"' \
       '  printf "\\n"' \
       'fi' \
