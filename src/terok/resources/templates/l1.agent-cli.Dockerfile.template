@@ -76,6 +76,8 @@ RUN chmod +x /usr/local/share/terok/terok-git-identity.sh
 
 # Copy blablador wrapper (OpenCode-based)
 COPY scripts/blablador /usr/local/bin/blablador
+# Copy kisski wrapper (OpenCode-based)
+COPY scripts/kisski /usr/local/bin/kisski
 COPY scripts/vibe-model-sync.sh /usr/local/bin/vibe-model-sync
 COPY scripts/mistral-model-sync.py /usr/local/bin/mistral-model-sync.py
 RUN chmod +x /usr/local/bin/blablador /usr/local/bin/vibe-model-sync /usr/local/bin/mistral-model-sync.py
